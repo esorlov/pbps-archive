@@ -26,6 +26,60 @@
 #define ICOTYPE "image/x-icon"
 #define HTMLTYPE "text/html"
 
+#define MAP_SIZE 6
+
+
+struct cont_element {
+  char ext[5];
+  char type[20];
+} cont_map[MAP_SIZE] = {
+			   { ".htm", "text/html" },
+			   { "html", "text/html" },
+			   { ".ico", "image/x-icon" },
+			   { ".png", "image/png" },
+			   { ".jpg", "image/jpeg" },
+			   { "jpeg", "image/jpeg" }
+};
+
+char* get_content_type(char *cont_type,
+		     char *file_name) {
+
+  char *ext;
+  cont_type = NULL;
+  ext = &file_name[strlen(file_name)-4];
+  for (int i=0; i < MAP_SIZE; i++)
+      if (0 == strcmp(cont_map[i].ext , ext))
+	cont_type = cont_map[i].type;
+  if (! cont_type)
+     cont_type = cont_map[0].type;
+  return cont_type;
+}
+
+
+int add_to_log (const char *url,
+		const char *method,
+                const char *version,
+		const char *upload_data,
+		size_t *upload_data_size) {
+
+  (void)upload_data;       /* Unused. Silent compiler warning. */
+  (void)upload_data_size;  /* Unused. Silent compiler warning. */
+
+  printf ("New %s request for %s using version %s\n", method, url, version);
+  return MHD_YES;
+}
+
+int construct_filename (char *file_name,
+			const char *url,
+			const char *basedir) {
+  strcpy(file_name, basedir);
+  strcpy(file_name, strcat(file_name,url));
+  if ( file_name[strlen(file_name)-1] == '/' )
+    strcpy(file_name,strcat(file_name,INDEX_HTML));
+  return MHD_YES;
+}
+
+
 static int
 answer_to_connection (void *cls,
 		      struct MHD_Connection *connection,
@@ -34,43 +88,31 @@ answer_to_connection (void *cls,
                       const char *version,
 		      const char *upload_data,
                       size_t *upload_data_size,
-		      void **con_cls)
-{
+		      void **con_cls) {
+
+  (void)cls;               /* Unused. Silent compiler warning. */
+  (void)con_cls;           /* Unused. Silent compiler warning. */
+  
   struct MHD_Response *response;
   int fd;
   int ret;
   struct stat sbuf;
-  char file_name[256] = BASEDIR;
-  char* ext;
-  char content_type[100] = HTMLTYPE;
-  (void)cls;               /* Unused. Silent compiler warning. */
-  /*(void)url;                Unused. Silent compiler warning. */
-  /*(void)method;             Unused. Silent compiler warning. */
-  /*(void)version;            Unused. Silent compiler warning. */
-  (void)upload_data;       /* Unused. Silent compiler warning. */
-  (void)upload_data_size;  /* Unused. Silent compiler warning. */
-  (void)con_cls;           /* Unused. Silent compiler warning. */
+  char file_name[256];
+  char *content_type;
 
-  printf ("New %s request for %s using version %s\n", method, url, version);
+  add_to_log(url, method, version, upload_data, upload_data_size);
+
   
   if (0 != strcmp (method, "GET"))
     return MHD_NO;
-  strcpy(file_name,strcat(file_name,url));
 
-  if ( file_name[strlen(file_name)-1] == '/' )
-    strcpy(file_name,strcat(file_name,INDEX_HTML));
+  if (! construct_filename(file_name, url, BASEDIR))
+    return MHD_NO;
 
-  ext = &file_name[strlen(file_name)-3];
-
-  if (0 == strcmp(ext, "png"))
-    strcpy(content_type, PNGTYPE);
-
-  if (0 == strcmp(ext, "ico"))
-    strcpy(content_type, ICOTYPE);
+  content_type = get_content_type(content_type, file_name);
+  if (! content_type ) 
+    return MHD_NO;
   
-  if (0 == strcmp(ext, "jpg") || 0 == strcmp(ext, "peg"))
-    strcpy(content_type, JPGTYPE);
-
   if ( (-1 == (fd = open (file_name, O_RDONLY))) ||
        (0 != fstat (fd, &sbuf)) ) {
       const char *errorstr =
