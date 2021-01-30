@@ -1,13 +1,6 @@
-/* Feel free to use this example code in any way
-   you see fit (Public Domain) */
-
 #include <sys/types.h>
-#ifndef _WIN32
 #include <sys/select.h>
 #include <sys/socket.h>
-#else
-#include <winsock2.h>
-#endif
 #include <string.h>
 #include <microhttpd.h>
 #include <stdio.h>
@@ -15,7 +8,8 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <string.h>
-
+#include <signal.h>
+#include <stdlib.h>
 
 #define PORT 8888
 
@@ -27,6 +21,8 @@
 #define HTMLTYPE "text/html"
 
 #define MAP_SIZE 6
+
+struct MHD_Daemon *mht_daemon;
 
 
 struct cont_element {
@@ -73,9 +69,9 @@ int construct_filename (char *file_name,
 			const char *url,
 			const char *basedir) {
   strcpy(file_name, basedir);
-  strcpy(file_name, strcat(file_name,url));
+  strcpy(file_name, strcat(file_name, url));
   if ( file_name[strlen(file_name)-1] == '/' )
-    strcpy(file_name,strcat(file_name,INDEX_HTML));
+    strcpy(file_name,strcat(file_name, INDEX_HTML));
   return MHD_YES;
 }
 
@@ -146,17 +142,21 @@ answer_to_connection (void *cls,
   return ret;
 }
 
+void quit_handler(int s) {
+  if (NULL != mht_daemon)
+    MHD_stop_daemon (mht_daemon);
+  exit(0);
+}
 
-int
-main (void) {
-  struct MHD_Daemon *daemon;
-
-  daemon = MHD_start_daemon (MHD_USE_INTERNAL_POLLING_THREAD, PORT, NULL, NULL,
+int main (void) {
+  signal(SIGINT, quit_handler);
+  signal(SIGTERM, quit_handler);
+  mht_daemon = MHD_start_daemon (MHD_USE_INTERNAL_POLLING_THREAD,
+			     PORT, NULL, NULL,
                              &answer_to_connection, NULL, MHD_OPTION_END);
-  if (NULL == daemon)
+  if (NULL == mht_daemon)
     return 1;
 
-  while(1) {};
-  MHD_stop_daemon (daemon);
+  while(1) sleep(1);
   return 0;
 }
