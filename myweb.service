@@ -1,0 +1,10 @@
+[Unit]
+Description=Simple WWW Service
+After=network.target
+
+[Service]
+ExecStart=/usr/local/sbin/myweb
+KillMode=process
+
+[Install]
+WantedBy=multi-user.target
