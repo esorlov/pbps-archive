@@ -16,10 +16,7 @@
 
 #define BASEDIR "/var/www"
 #define INDEX_HTML "index.html"
-#define PNGTYPE "image/png"
-#define JPGTYPE "image/jpg"
-#define ICOTYPE "image/x-icon"
-#define HTMLTYPE "text/html"
+#define AUTH_PREFIX "/private"
 
 #define MAP_SIZE 6
 
@@ -72,7 +69,7 @@ int add_to_log (struct MHD_Connection *connection,
   (void)upload_data;       /* Unused. Silent compiler warning. */
   (void)upload_data_size;  /* Unused. Silent compiler warning. */
 
-  printf ("%s request from %s for %s using version %s response code %d\n",
+  printf ("!--COME %s request from %s for %s using version %s response code %d\n",
 	  method, client_ip, url, version, ret_code);
   MHD_get_connection_values (connection, MHD_HEADER_KIND,
 			     &print_out_key, NULL);
@@ -90,6 +87,45 @@ int construct_filename (char *file_name,
   return MHD_YES;
 }
 
+
+int is_auth_needed(const char *url) {
+  if (url == strstr(url, AUTH_PREFIX)) 
+    return MHD_YES;
+  return MHD_NO; 
+}
+
+int make_response(struct MHD_Connection *connection,
+		  const char *url,
+		  const char *method,
+		  const char *version,
+		  const char *upload_data,
+		  size_t *upload_data_size,
+		  unsigned int status_code,
+		  struct MHD_Response *response) {
+  int ret;
+  ret =  MHD_queue_response (connection, status_code, response);
+  MHD_destroy_response (response);
+  add_to_log(connection, url, method, version,
+	     upload_data, upload_data_size, status_code);
+  return ret;
+}
+
+int auth_user(struct MHD_Connection *connection) {
+  char *user;
+  char *pass;
+  int fail;
+  pass = NULL;
+  user = MHD_basic_auth_get_username_password (connection,
+                                               &pass);
+  fail = ( (NULL == user) ||
+           (0 != strcmp (user, "root")) ||
+           (0 != strcmp (pass, "pa$$w0rd") ) );
+  if (NULL != user)
+    MHD_free (user);
+  if (NULL != pass)
+    MHD_free (pass);
+  return fail;
+}
 
 static int answer_to_connection (void *cls,
 		      struct MHD_Connection *connection,
@@ -109,11 +145,31 @@ static int answer_to_connection (void *cls,
   struct stat sbuf;
   char file_name[256];
   char *content_type;
-
  
   if (0 != strcmp (method, "GET"))
     return MHD_NO;
 
+  if (MHD_YES == is_auth_needed(url)) {
+    if (NULL == *con_cls) {
+      *con_cls = connection;
+      return MHD_YES;
+    }
+
+    if (0 != auth_user(connection)) {
+      const char *page = "<html><body>Go away.</body></html>";
+      response =
+	MHD_create_response_from_buffer (strlen (page), (void *) page,
+                                       MHD_RESPMEM_PERSISTENT);
+      ret = MHD_queue_basic_auth_fail_response (connection,
+                                              "my realm", response);
+      MHD_destroy_response (response);
+      add_to_log(connection, url, method, version,
+		 upload_data, upload_data_size, MHD_HTTP_FORBIDDEN);
+
+      return ret;
+    }
+  }
+    
   if (! construct_filename(file_name, url, BASEDIR))
     return MHD_NO;
 
@@ -124,8 +180,7 @@ static int answer_to_connection (void *cls,
   if ( (-1 == (fd = open (file_name, O_RDONLY))) ||
        (0 != fstat (fd, &sbuf)) ) {
       const char *errorstr =
-        "<html><body>An internal server error has occured!\
-                              </body></html>";
+        "<html><body>An internal server error has occured!</body></html>";
       /* error accessing file */
       if (fd != -1)
         (void) close (fd);
@@ -133,37 +188,29 @@ static int answer_to_connection (void *cls,
         MHD_create_response_from_buffer (strlen (errorstr),
                                          (void *) errorstr,
                                          MHD_RESPMEM_PERSISTENT);
-      if (NULL != response) {
-          ret =
-            MHD_queue_response (connection, MHD_HTTP_INTERNAL_SERVER_ERROR,
-                                response);
-          MHD_destroy_response (response);
-	  add_to_log(connection,
-		     url, method, version,
-		     upload_data, upload_data_size,
-		     MHD_HTTP_INTERNAL_SERVER_ERROR);
-          return ret;
-      }
+      if (NULL != response) 
+	return make_response(connection, url, method, version,
+			     upload_data, upload_data_size,
+			     MHD_HTTP_INTERNAL_SERVER_ERROR,
+			     response);
       else
         return MHD_NO;
   }
   response =
     MHD_create_response_from_fd_at_offset64 (sbuf.st_size, fd, 0);
-  MHD_add_response_header (response, MHD_HTTP_HEADER_CONTENT_TYPE, content_type);
+  MHD_add_response_header (response,
+			   MHD_HTTP_HEADER_CONTENT_TYPE,
+			   content_type);
 
-  ret = MHD_queue_response (connection, MHD_HTTP_OK, response);
-  MHD_destroy_response (response);
-  add_to_log(connection,
-	     url, method, version,
-	     upload_data, upload_data_size,
-	     MHD_HTTP_OK);
-  return ret;
+  return make_response(connection, url, method, version,
+		       upload_data, upload_data_size,
+		       MHD_HTTP_OK,
+		       response);
 }
 
 static int on_client_connect (void *cls,
                               const struct sockaddr *addr,
 			      socklen_t addrlen) {
-  //printf ("sockaddr: %s\n", inet_ntoa(((struct sockaddr_in *)addr)->sin_addr));
   strcpy(client_ip, inet_ntoa(((struct sockaddr_in *)addr)->sin_addr));
   return MHD_YES;
 }
